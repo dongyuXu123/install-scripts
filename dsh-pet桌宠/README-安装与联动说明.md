@@ -50,6 +50,23 @@ sha256：36998e943f1c35b8ac4af34456a560a8d9aa18a4ba84eea237a7d0ffa28577a0
   3. GLM 聊天 provider 已配好（glm-4.6 @ coding 端点），**API Key 需在 桌宠设置 → AI 与对话 → 模型与连接 里填**（DeepSeek/GLM 两个 key 都填上后，「DeepSeek 余额」菜单会同时显示两行余额）
 - **升级方法**：`git fetch origin tag vX.Y.Z --depth=1 && git checkout -b dongyu-patches-vX.Y.Z vX.Y.Z && git cherry-pick 53ad44f`；cherry-pick 前先 `rm ~/apps/dsh-pet-src/assets`（symlink），操作完重建。智谱余额格式如解析失败，错误气泡里带响应前 200 字符，据此校准 `_parse_zhipu_balance`。
 
+## 窗口图标（2026-10-19，第 8 个补丁）
+
+- 窗口/任务栏图标改为 `local-assets/window-icon.png`（keai.png Q 版立绘 256px；
+  想换图就替换这个文件后重启桌宠）。桌面入口 Icon= 同步指向它。
+- **三层坑**（都是实测踩出来的）：① 上游只在设置对话框设过图标，主窗口从未设；
+  ② 本机 Qt/XWayland 下 Qt 写 `_NET_WM_ICON` 恒为空属性（最小普通窗口复现，
+  与窗口标志无关）；③ `xprop -set` 命令行最多收 64 个元素，图标数据 4098 个
+  会被截断成非法值。
+- **最终方案**：PetWindow 初始化尾 `setWindowIcon` + 2s/9s 两个 singleShot 调
+  `_apply_net_wm_icon_fallback()`，用 **python-xlib**（venv 新增依赖，重建 venv
+  时需 `uv pip install python-xlib`）直写 `_NET_WM_ICON` CARDINAL 数组。
+- 升级新版本 cherry-pick 后无需额外动作，图标文件在 git 分支里。
+- **Dock/任务栏图标要靠 .desktop 匹配**：GNOME Dock 不读窗口的 `_NET_WM_ICON`
+  （mutter 在窗口映射时缓存，之后不重读），按 `StartupWMClass` 匹配应用条目。
+  dsh-pet-fish.desktop（条目 ID 已换过一次以强刷 Shell 图标缓存）已加 `StartupWMClass=dsh-pet-standalone`（窗口 WM_CLASS 的
+  class 名）。改图标 = 换 window-icon.png + 改 .desktop 的 Icon= 同一路径。
+
 ## 已知说明
 
 - **点击穿透问题（2026-10-19 已修复）**：默认 overlay 拓扑是"铺满整个虚拟桌面的

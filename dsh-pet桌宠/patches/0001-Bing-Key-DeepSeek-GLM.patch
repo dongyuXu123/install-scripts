@@ -1,7 +1,7 @@
 From 53ad44f541e4dfd1ac1b465649e54de5002c4d17 Mon Sep 17 00:00:00 2001
 From: dongyu <dongyu@local>
 Date: Mon, 19 Oct 2026 12:39:45 +0800
-Subject: [PATCH 1/7] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
+Subject: [PATCH 01/12] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
  =?UTF-8?q?=EF=BC=9ABing=20=E5=85=8DKey=E6=90=9C=E7=B4=A2=E5=BC=95?=
  =?UTF-8?q?=E6=93=8E=20+=20=E5=A4=9A=E4=BE=9B=E5=BA=94=E5=95=86(DeepSeek/G?=
  =?UTF-8?q?LM)=E4=BD=99=E9=A2=9D=E6=98=BE=E7=A4=BA?=

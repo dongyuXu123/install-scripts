@@ -1,0 +1,41 @@
+From fb5f4857d4ceb3d94fdce8166df4e1afe6bc4841 Mon Sep 17 00:00:00 2001
+From: dongyu <dongyu@local>
+Date: Mon, 19 Oct 2026 17:26:55 +0800
+Subject: [PATCH 11/12] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
+ =?UTF-8?q?=EF=BC=9A=E5=9B=BE=E6=A0=87=E6=96=87=E4=BB=B6=E6=9B=B4=E5=90=8D?=
+ =?UTF-8?q?=20dsh-pet-icon-256.png=20=E7=BB=95=E5=BC=80=20GNOME=20Shell=20?=
+ =?UTF-8?q?=E6=8C=89=E8=B7=AF=E5=BE=84=E7=9A=84=E5=9B=BE=E6=A0=87=E7=BC=93?=
+ =?UTF-8?q?=E5=AD=98?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../{window-icon.png => dsh-pet-icon-256.png}       | Bin
+ pet/application_icon.py                             |   4 ++--
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+ rename local-assets/{window-icon.png => dsh-pet-icon-256.png} (100%)
+
+diff --git a/local-assets/window-icon.png b/local-assets/dsh-pet-icon-256.png
+similarity index 100%
+rename from local-assets/window-icon.png
+rename to local-assets/dsh-pet-icon-256.png
+diff --git a/pet/application_icon.py b/pet/application_icon.py
+index a45a628..2dc417c 100644
+--- a/pet/application_icon.py
++++ b/pet/application_icon.py
+@@ -41,9 +41,9 @@ __all__ = [
+ #: 图标在源码树 / 冻结包里的相对路径（冻结包按 ``sys._MEIPASS`` 为根，与
+ #: ``pet/game_fps.py`` 的 ``BACKEND_RELATIVE_DIR`` 同一约定）。三端构建脚本里的
+ #: ``--add-data`` 目标必须与它一致。
+-#: 本地补丁：源码运行改用 local-assets/window-icon.png（Q 版立绘，比官方
++#: 本地补丁：源码运行改用 local-assets/dsh-pet-icon-256.png（Q 版立绘，比官方
+ #: icon.ico 好看）；冻结包候选回退原路径不受影响。
+-APPLICATION_ICON_RELATIVE_PATH = ("local-assets", "window-icon.png")
++APPLICATION_ICON_RELATIVE_PATH = ("local-assets", "dsh-pet-icon-256.png")
+ 
+ #: 缓存内容：``(所属应用实例, QIcon)``。用应用实例做键：QIcon 不能早于应用构造，
+ #: 也不该跨应用实例复用（测试会重建 QApplication）。
+-- 
+2.53.0
+
