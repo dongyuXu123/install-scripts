@@ -11,6 +11,7 @@
 | [clover-install/](clover-install/) | Clover r5175 引导 + Catalina 主题，UEFI 双系统开机菜单（含 ESP 完整镜像，可一键重装/卸载） | `sudo bash install.sh` / `uninstall.sh` |
 | [codex-zh-linux/](codex-zh-linux/) | Codex 桌面应用（Linux）简体中文界面补丁，翻转 app.asar 内置 i18n 开关 | `sudo bash codex-zh-linux.sh` |
 | [hermes-install/](hermes-install/) | Hermes Agent 更新用的本地 PyPI 加速代理（TLS 改写 → 清华镜像） | 见该目录 README |
+| [sogou-wechat-qq/](sogou-wechat-qq/) | 搜狗输入法 + 微信 + QQ 三件套（26.04 Wayland，绕过 im-config 无 fcitx4 等三坑；含 QQ 官方直链 GetSign 签名下载脚本） | `bash download-debs.sh` → `sudo bash install-sogou-wechat-qq.sh` |
 
 每个目录内的 `README.md` 记录背景、用法、回滚方式和当时的踩坑要点。
 
