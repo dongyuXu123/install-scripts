@@ -1,0 +1,238 @@
+From 6cbdf48d974baf65bae923b11c3a188d88f9b12b Mon Sep 17 00:00:00 2001
+From: dongyu <dongyu@local>
+Date: Mon, 19 Oct 2026 13:34:53 +0800
+Subject: [PATCH 4/7] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
+ =?UTF-8?q?=EF=BC=9A=E7=81=B5=E5=8A=A8=E5=B2=9B=E5=8D=A1=E7=89=87=E4=BD=99?=
+ =?UTF-8?q?=E9=A2=9D=E5=8F=8C=E8=A1=8C=E5=AE=8C=E6=95=B4=E4=BF=A1=E6=81=AF?=
+ =?UTF-8?q?(DeepSeek=E6=98=8E=E7=BB=86/GLM=E5=B8=A6=E9=87=8D=E7=BD=AE?=
+ =?UTF-8?q?=E6=97=B6=E9=97=B4)=EF=BC=8C=E9=A1=B6=E6=A0=8F=E4=BF=9D?=
+ =?UTF-8?q?=E6=8C=81=E7=B4=A7=E5=87=91=E5=8D=95=E8=A1=8C?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ pet/app.py            | 12 ++++++--
+ pet/balance.py        | 65 ++++++++++++++++++++++++++++++-------------
+ pet/dynamic_island.py | 18 ++++++++----
+ 3 files changed, 67 insertions(+), 28 deletions(-)
+
+diff --git a/pet/app.py b/pet/app.py
+index 3d20d2f..b311f39 100644
+--- a/pet/app.py
++++ b/pet/app.py
+@@ -3560,9 +3560,11 @@ class AppShell:
+         if getattr(self, "island", None) is None:
+             return
+         text = "余额 --"
++        card_text = None
+         if isinstance(payload, dict):
+             text = str(payload.get("text") or "余额 --")
+-        self.island.set_balance_info(self._island_tier_hint(), text)
++            card_text = str(payload.get("card_text") or "") or None
++        self.island.set_balance_info(self._island_tier_hint(), text, card_text)
+         if animate:
+             self.island.notify_event("balance")
+ 
+@@ -3698,6 +3700,7 @@ class AppShell:
+             except Exception:
+                 entries = []
+             lines = []
++            card_lines = []
+             first_info = {}
+             for provider in entries:
+                 label = str(getattr(provider, 'name', '') or getattr(provider, 'provider_id', ''))
+@@ -3710,15 +3713,18 @@ class AppShell:
+                 try:
+                     info = balance_mod.fetch_balance(provider.base_url, key, verify_ssl=verify_ssl)
+                     lines.append(balance_mod.format_balance_labeled(label, info))
++                    card_lines.append(balance_mod.format_balance_card_labeled(label, info))
+                     if not first_info:
+                         first_info = info
+                 except Exception as exc:  # noqa: BLE001 - 单一厂商失败不影响其它行
+-                    lines.append(f'{label}：查询失败（{exc}）')
++                    lines.append(f'{label}: 查询失败（{exc}）')
++                    card_lines.append(f'{label}：查询失败（{exc}）')
+             if not lines:
+                 info = balance_mod.fetch_balance(base_url, api_key, verify_ssl=verify_ssl)
+                 lines.append(balance_mod.format_balance(info))
++                card_lines.append(balance_mod.format_balance(info))
+                 first_info = info
+-            payload = {"text": '；'.join(lines), "info": first_info}
++            payload = {"text": '；'.join(lines), "card_text": '\n'.join(card_lines), "info": first_info}
+             self._balance_cache = (time.monotonic(), payload, provider_key)
+             self._write_balance_file_cache(payload, provider_key)
+             bridge.done.emit(True, payload)
+diff --git a/pet/balance.py b/pet/balance.py
+index b8140be..2db9905 100644
+--- a/pet/balance.py
++++ b/pet/balance.py
+@@ -128,20 +128,21 @@ def fetch_balance(base_url: str, api_key: str, timeout: float = 10.0,
+     }
+ 
+ 
+-def _zhipu_quota_text(data) -> str:
+-    """把智谱配额响应体解析成紧凑文本（纯函数，便于测试）。
++def _zhipu_quota_parts(data) -> dict:
++    """解析配额响应 → {'text': 顶栏紧凑文本, 'card_text': 卡片完整文本}（纯函数）。
+ 
+-    实测形态（与 cc-switch 一致）：data.limits[].{type,unit,number,percentage}；
+-    unit 3 = 5 小时滚动窗口、6 = 本周窗口（只锚定 unit 不绑 number）。
+-    展示口径是**剩余百分比**（100 - percentage），无可用条目抛 BalanceError。
++    实测形态（与 cc-switch 一致）：data.limits[].{type,unit,percentage,
++    nextResetTime}；unit 3 = 5 小时滚动窗口、6 = 本周窗口（只锚定 unit 不绑
++    number）。展示口径是**剩余百分比**（100 - percentage）；卡片文本额外带
++    5 小时窗口的最近重置时间。无可用条目抛 BalanceError。
+     """
+     if not isinstance(data, dict):
+         raise BalanceError('返回数据无效')
+     if data.get('success') is False:
+         raise BalanceError(str(data.get('msg') or '配额查询失败'))
+     node = data.get('data') if isinstance(data.get('data'), dict) else {}
+-    main_rem = None
+-    weekly_rem = None
++    main = None    # (剩余百分比, 重置时间 datetime | None)
++    weekly = None
+     for item in node.get('limits') or []:
+         if not isinstance(item, dict):
+             continue
+@@ -152,22 +153,36 @@ def _zhipu_quota_text(data) -> str:
+         except (TypeError, ValueError):
+             continue
+         remaining = max(0.0, min(100.0, 100.0 - pct))
++        reset = None
++        ts = item.get('nextResetTime')
++        try:
++            reset = datetime.fromtimestamp(float(ts) / 1000.0, _BEIJING_TZ)
++        except (TypeError, ValueError, OSError, OverflowError):
++            reset = None
+         if item.get('unit') == 3:
+-            if main_rem is None:
+-                main_rem = remaining
++            if main is None:
++                main = (remaining, reset)
+         elif item.get('unit') == 6:
+-            if weekly_rem is None:
+-                weekly_rem = remaining
+-        elif main_rem is None:
+-            main_rem = remaining
+-    if main_rem is None and weekly_rem is None:
++            if weekly is None:
++                weekly = (remaining, reset)
++        elif main is None:
++            main = (remaining, reset)
++    if main is None and weekly is None:
+         raise BalanceError('响应中没有配额信息：' + json.dumps(data, ensure_ascii=False)[:200])
+     text = ''
+-    if main_rem is not None:
+-        text += f'余额 {main_rem:.0f}%'
+-    if weekly_rem is not None:
+-        text += f'（本周余额: {weekly_rem:.0f}%）'
+-    return text
++    if main is not None:
++        text += f'余额 {main[0]:.0f}%'
++    if weekly is not None:
++        text += f'（本周余额: {weekly[0]:.0f}%）'
++    card = text
++    if main is not None and main[1] is not None:
++        card += f'，{main[1]:%m-%d %H:%M} 重置'
++    return {'text': text, 'card_text': card}
++
++
++def _zhipu_quota_text(data) -> str:
++    """顶栏紧凑文本（卡片完整文本见 ``_zhipu_quota_parts``）。"""
++    return _zhipu_quota_parts(data)['text']
+ 
+ 
+ def _fetch_zhipu_quota(api_key: str, timeout: float = 10.0,
+@@ -199,8 +214,9 @@ def _fetch_zhipu_quota(api_key: str, timeout: float = 10.0,
+         raise BalanceError('返回数据无效') from exc
+     except (OSError, ValueError) as exc:
+         raise BalanceError(f'返回数据无效：{exc}') from exc
++    parts = _zhipu_quota_parts(data)
+     return {'is_available': True, 'total': '', 'granted': '', 'topped_up': '',
+-            'quota_text': _zhipu_quota_text(data)}
++            'quota_text': parts['text'], 'quota_card_text': parts['card_text']}
+ 
+ 
+ def format_balance(info: dict) -> str:
+@@ -230,6 +246,15 @@ def format_balance_labeled(label: str, info: dict) -> str:
+     return f'{label}: 余额 ¥{total}'
+ 
+ 
++def format_balance_card_labeled(label: str, info: dict) -> str:
++    """展开卡完整行（本地补丁）：DeepSeek 带充值/赠送明细；
++    GLM 带最近重置时间。文本供灵动岛卡片逐行展示。"""
++    quota = str(info.get('quota_card_text', '') or '')
++    if quota:
++        return f'{label}：{quota}'
++    return f'{label}：{format_balance(info)}'
++
++
+ def balance_percent(total: str | float | None) -> float | None:
+     """把 DeepSeek 余额折算为“已用百分比”（0 = 未消耗，100 = 耗尽）。
+ 
+diff --git a/pet/dynamic_island.py b/pet/dynamic_island.py
+index 7b59404..ff197cd 100644
+--- a/pet/dynamic_island.py
++++ b/pet/dynamic_island.py
+@@ -545,6 +545,7 @@ class DynamicIsland(QWidget):
+         self._press_global: QPoint | None = None
+         self._balance_tier_text = "余额峰谷 --"
+         self._balance_text = "余额 --"
++        self._balance_card_text = "余额 --"   # 展开卡余额文本（本地补丁：可多行完整信息）
+         self._pet_visible = True
+         # 本构建是否具备聊天能力（AppShell 按 enable_chat 喂入，默认 True
+         # 维持现状；纯桌宠版置 False 时 hidden_chat 单击路由回退展开卡片）
+@@ -913,9 +914,11 @@ class DynamicIsland(QWidget):
+         self._clear_icon_cache()
+         self.update()
+ 
+-    def set_balance_info(self, tier_text: str, balance_text: str) -> None:
++    def set_balance_info(self, tier_text: str, balance_text: str, card_text: str | None = None) -> None:
+         self._balance_tier_text = str(tier_text or "余额峰谷 --")
+         self._balance_text = str(balance_text or "余额 --")
++        # 本地补丁：卡片可携带与顶栏不同的完整余额文本（多行，逐供应商一行）
++        self._balance_card_text = str(card_text) if card_text else self._balance_text
+         self._sync_card_labels()
+         self._refresh()
+ 
+@@ -2015,7 +2018,7 @@ class DynamicIsland(QWidget):
+             btn.setFixedHeight(_CARD_BUTTON_H)
+         self._card_toggle_btn.setText("隐藏桌宠" if self._pet_visible else "显示桌宠")
+         # ---- A 概览 ----
+-        self._card_balance_label.setText(self._balance_text)
++        self._card_balance_label.setText(self._balance_card_text)
+         self._card_tier_label.setText(self._balance_tier_text)
+         self._card_status_label.setText(self._card_status_text())
+         # ---- B 指标详情 ----
+@@ -2073,10 +2076,12 @@ class DynamicIsland(QWidget):
+ 
+     # ------------------------------------------------------------ 卡片账目（高度/宽度）
+     def _card_overview_height(self) -> int:
+-        """A 区高 = 主读数行 + 峰谷行 + 状态行，逐行实测（+ 两处行距）。"""
++        """A 区高 = 主读数行（1..N 行，随卡片余额文本行数自适应）+ 峰谷行 + 状态行。"""
+         metrics = self._metrics_for("aux")
+         status_h = max(metrics.height(), int(_STATUS_DOT_PX))
+-        return (self._metrics_for("primary").height()
++        primary = self._metrics_for("primary")
++        lines = max(1, self._balance_card_text.count('\n') + 1)
++        return (lines * primary.height() + (lines - 1) * _CARD_LINE_GAP
+                 + _CARD_LINE_GAP + metrics.height()
+                 + _CARD_LINE_GAP + status_h)
+ 
+@@ -2117,7 +2122,10 @@ class DynamicIsland(QWidget):
+         metrics = self._metrics_for("aux")
+         lines = self._card_message_lines()
+         self._card_overview.setFixedHeight(self._card_overview_height())
+-        self._card_balance_label.setFixedHeight(self._metrics_for("primary").height())
++        primary_metrics = self._metrics_for("primary")
++        card_lines = max(1, self._balance_card_text.count('\n') + 1)
++        self._card_balance_label.setFixedHeight(
++            card_lines * primary_metrics.height() + (card_lines - 1) * _CARD_LINE_GAP)
+         self._card_tier_label.setFixedHeight(metrics.height())
+         self._card_status_row.setFixedHeight(max(metrics.height(), int(_STATUS_DOT_PX)))
+         self._card_metrics.setFixedHeight(max(1, self._card_metrics_height(rows)))
+-- 
+2.53.0
+

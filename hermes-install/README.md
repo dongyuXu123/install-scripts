@@ -19,9 +19,11 @@ Hermes Agent v0.22.2 一起在本机（Ubuntu 26.04）部署并验证可用。
 |---|---|
 | `mitm-proxy.py` | 代理本体，监听 `127.0.0.1:8932`。对 MITM 域名终结 TLS 后改写 Host 转发给 tuna（强制 `Connection: close`）；其它域名 CONNECT 盲转发，不做任何处理 |
 | `hermes-pypi-proxy.service` | systemd 用户级单元，开机自启、崩溃 3 秒后自动重启 |
+| `mitm-ca.pem` / `mitm-leaf.pem` / `mitm-leaf-key.pem` | 本机正在使用的证书（2026-10-19 起运行本体整体迁入本目录） |
 
-证书（CA + 叶子证书/私钥）**不入库**——私钥传公开仓库等于把中间人能力送人。
-新机器按下面两条命令重新生成即可。
+> ⚠️ **本目录含私钥（`mitm-leaf-key.pem`），传 GitHub 等公开仓库前必须排除全部
+> `*.pem`**——私钥进公开仓库等于把中间人能力送人。仓库版只收录 `mitm-proxy.py`、
+> `hermes-pypi-proxy.service` 和本 README，证书在新机器按下面两条命令重新生成即可。
 
 ## 部署步骤（新机器）
 

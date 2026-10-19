@@ -1,0 +1,263 @@
+From 53ad44f541e4dfd1ac1b465649e54de5002c4d17 Mon Sep 17 00:00:00 2001
+From: dongyu <dongyu@local>
+Date: Mon, 19 Oct 2026 12:39:45 +0800
+Subject: [PATCH 1/7] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
+ =?UTF-8?q?=EF=BC=9ABing=20=E5=85=8DKey=E6=90=9C=E7=B4=A2=E5=BC=95?=
+ =?UTF-8?q?=E6=93=8E=20+=20=E5=A4=9A=E4=BE=9B=E5=BA=94=E5=95=86(DeepSeek/G?=
+ =?UTF-8?q?LM)=E4=BD=99=E9=A2=9D=E6=98=BE=E7=A4=BA?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ pet/app.py             | 31 +++++++++++++++++--
+ pet/balance.py         | 67 +++++++++++++++++++++++++++++++++++-------
+ pet/chat/models.py     |  2 +-
+ pet/chat/web_search.py | 44 ++++++++++++++++++++++++++-
+ 4 files changed, 129 insertions(+), 15 deletions(-)
+
+diff --git a/pet/app.py b/pet/app.py
+index 620db4b..8c69ed4 100644
+--- a/pet/app.py
++++ b/pet/app.py
+@@ -3691,9 +3691,34 @@ class AppShell:
+     def _balance_worker(self, bridge, base_url: str, api_key: str, verify_ssl: bool, provider_key: str = '', *, quiet: bool = False) -> None:
+         from . import balance as balance_mod  # 按需导入（见 _show_balance_payload）
+         try:
+-            info = balance_mod.fetch_balance(base_url, api_key, verify_ssl=verify_ssl)
+-            text = balance_mod.format_balance(info)
+-            payload = {"text": text, "info": info}
++            # 本地补丁：枚举所有已配 Key 的 provider 逐个查余额，气泡按行合并展示；
++            # 单一厂商失败不影响其它行。枚举失败时退回调用方传入的单一 provider。
++            try:
++                entries = list(self.config.chat_settings().providers.values())
++            except Exception:
++                entries = []
++            lines = []
++            first_info = {}
++            for provider in entries:
++                label = str(getattr(provider, 'name', '') or getattr(provider, 'provider_id', ''))
++                try:
++                    key = str(self.config.resolve_api_key(provider) or '')
++                except Exception:
++                    key = ''
++                if not key.strip():
++                    continue
++                try:
++                    info = balance_mod.fetch_balance(provider.base_url, key, verify_ssl=verify_ssl)
++                    lines.append(balance_mod.format_balance_labeled(label, info))
++                    if not first_info:
++                        first_info = info
++                except Exception as exc:  # noqa: BLE001 - 单一厂商失败不影响其它行
++                    lines.append(f'{label}：查询失败（{exc}）')
++            if not lines:
++                info = balance_mod.fetch_balance(base_url, api_key, verify_ssl=verify_ssl)
++                lines.append(balance_mod.format_balance(info))
++                first_info = info
++            payload = {"text": '\n'.join(lines), "info": first_info}
+             self._balance_cache = (time.monotonic(), payload, provider_key)
+             self._write_balance_file_cache(payload, provider_key)
+             bridge.done.emit(True, payload)
+diff --git a/pet/balance.py b/pet/balance.py
+index 5593881..60dba81 100644
+--- a/pet/balance.py
++++ b/pet/balance.py
+@@ -25,6 +25,19 @@ from zoneinfo import ZoneInfo
+ 
+ BALANCE_PATH = '/user/balance'
+ 
++
++def _balance_endpoint(base_url: str) -> str:
++    """按厂商映射余额端点（本地补丁，支持多供应商余额）。
++
++    - DeepSeek 及其它 OpenAI 风格平台：``base_url + /user/balance``
++    - 智谱 open.bigmodel.cn：余额接口与聊天 base 不同源，
++      固定为 https://open.bigmodel.cn/api/paas/v4/users/me/balance
++    """
++    base = str(base_url or '').strip().rstrip('/')
++    if 'bigmodel.cn' in base:
++        return 'https://open.bigmodel.cn/api/paas/v4/users/me/balance'
++    return base + BALANCE_PATH
++
+ # DeepSeek 满额基准（¥）：余额 ≥ 该值视为 100%（未消耗），余额按比例折算为已用百分比
+ DEEPSEEK_FULL_BALANCE_CNY = 20.0
+ 
+@@ -81,7 +94,7 @@ def fetch_balance(base_url: str, api_key: str, timeout: float = 10.0,
+     返回 {'is_available': bool, 'total': str, 'granted': str, 'topped_up': str}；
+     未配置 Key / 端点不支持 / 网络失败抛 BalanceError。
+     """
+-    endpoint = str(base_url or '').strip().rstrip('/') + BALANCE_PATH
++    endpoint = _balance_endpoint(base_url)
+     if not api_key:
+         raise BalanceError('未配置 API Key')
+     from .chat.providers import build_browser_headers  # 延迟导入：无 Chat 变体排除 pet.chat
+@@ -105,15 +118,41 @@ def fetch_balance(base_url: str, api_key: str, timeout: float = 10.0,
+     except (OSError, ValueError) as exc:
+         raise BalanceError(f'返回数据无效：{exc}') from exc
+     infos = data.get('balance_infos') if isinstance(data, dict) else None
+-    if not infos:
+-        raise BalanceError('响应中没有余额信息')
+-    info = _pick_balance_info(infos)
+-    return {
+-        'is_available': bool(data.get('is_available', True)),
+-        'total': str(info.get('total_balance', '')),
+-        'granted': str(info.get('granted_balance', '')),
+-        'topped_up': str(info.get('topped_up_balance', '')),
+-    }
++    if infos:
++        info = _pick_balance_info(infos)
++        return {
++            'is_available': bool(data.get('is_available', True)),
++            'total': str(info.get('total_balance', '')),
++            'granted': str(info.get('granted_balance', '')),
++            'topped_up': str(info.get('topped_up_balance', '')),
++        }
++    zhipu = _parse_zhipu_balance(data)
++    if zhipu is not None:
++        return zhipu
++    preview = json.dumps(data, ensure_ascii=False)[:200] if isinstance(data, (dict, list)) else str(data)[:200]
++    raise BalanceError(f'响应中没有余额信息：{preview}')
++
++
++def _parse_zhipu_balance(data):
++    """智谱开放平台余额格式（/api/paas/v4/users/me/balance，非 DeepSeek 形态）。
++
++    字段位置按常见形态容错识别（data 包一层或顶层；total_balance/balance/total），
++    识别失败返回 None 由调用方报错。返回与 DeepSeek 相同的 info 字典形状。
++    """
++    if not isinstance(data, dict):
++        return None
++    node = data.get('data') if isinstance(data.get('data'), dict) else data
++    total = ''
++    for key in ('total_balance', 'balance', 'total', 'available_balance'):
++        value = node.get(key)
++        if value not in (None, ''):
++            total = str(value)
++            break
++    if not total:
++        return None
++    granted = str(node.get('granted_balance', '') or '')
++    topped = str(node.get('topped_up_balance', '') or node.get('topped_up', '') or '')
++    return {'is_available': True, 'total': total, 'granted': granted, 'topped_up': topped}
+ 
+ 
+ def format_balance(info: dict) -> str:
+@@ -128,6 +167,14 @@ def format_balance(info: dict) -> str:
+     return f'余额 ¥{total}'
+ 
+ 
++def format_balance_labeled(label: str, info: dict) -> str:
++    """多供应商余额行：'DeepSeek：余额 ¥12.34（…）'（本地补丁）。"""
++    body = format_balance(info)
++    if body == '余额信息为空':
++        return body
++    return f'{label}：{body}'
++
++
+ def balance_percent(total: str | float | None) -> float | None:
+     """把 DeepSeek 余额折算为“已用百分比”（0 = 未消耗，100 = 耗尽）。
+ 
+diff --git a/pet/chat/models.py b/pet/chat/models.py
+index 15467a6..1d53b41 100644
+--- a/pet/chat/models.py
++++ b/pet/chat/models.py
+@@ -27,7 +27,7 @@ def _safe_int(v, default, lo=None, hi=None):
+ 
+ THINKING_MODES=('auto','enabled','disabled')
+ REASONING_EFFORTS=('low','high','max')
+-WEB_SEARCH_ENGINES=('baidu','duckduckgo','bocha','tavily')
++WEB_SEARCH_ENGINES=('baidu','duckduckgo','bing','bocha','tavily')
+ # 需要 API Key 的搜索引擎（其余为免 Key 的网页抓取）
+ WEB_SEARCH_KEYED_ENGINES=('bocha','tavily')
+ 
+diff --git a/pet/chat/web_search.py b/pet/chat/web_search.py
+index d3fda96..f46b0cb 100644
+--- a/pet/chat/web_search.py
++++ b/pet/chat/web_search.py
+@@ -8,11 +8,13 @@ DeepSeek 等 OpenAI 兼容 API 本身不带联网能力，providers.py 在正式
+ - baidu：免 Key，抓取百度网页结果（默认；国内直连可用）
+ - duckduckgo：免 Key，抓取 html.duckduckgo.com（国内网络通常需要代理）
+   两个免 Key 引擎互为兜底；频繁请求会被要求人机验证，此时如实报错，不尝试绕过。
++- bing：免 Key，抓取 cn.bing.com 网页结果（国内直连可用；本地补丁，非上游功能）
+ - bocha：博查 Web Search API（需 Key，国内可用）
+ - tavily：Tavily Search API（需 Key）
+ """
+ from __future__ import annotations
+ 
++import base64
+ import html as _html
+ import json
+ import re
+@@ -26,6 +28,7 @@ from .providers import _make_ssl_context as make_ssl_context, build_browser_head
+ ENGINE_LABELS = {
+     'baidu': '百度（免 Key）',
+     'duckduckgo': 'DuckDuckGo（免 Key）',
++    'bing': 'Bing（免 Key）',
+     'bocha': '博查 Bocha（需 API Key）',
+     'tavily': 'Tavily（需 API Key）',
+ }
+@@ -113,6 +116,38 @@ def parse_duckduckgo_html(page: str, limit: int) -> list[SearchResult]:
+     return results
+ 
+ 
++def _bing_unwrap(href: str) -> str:
++    """还原 Bing 的 bing.com/ck/a 跳转链接：u=a1<base64url> → 原始 URL。"""
++    if 'bing.com/ck/a' not in href:
++        return href
++    m = re.search(r'[?&]u=a1([^&]+)', href)
++    if not m:
++        return href
++    b64 = m.group(1)
++    b64 += '=' * (-len(b64) % 4)
++    try:
++        return base64.urlsafe_b64decode(b64).decode('utf-8', 'replace')
++    except Exception:
++        return href
++
++
++def parse_bing_html(page: str, limit: int) -> list[SearchResult]:
++    results: list[SearchResult] = []
++    for chunk in re.split(r'<li class="b_algo', page)[1:]:
++        m = re.search(r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', chunk, re.S)
++        if not m:
++            continue
++        url = _bing_unwrap(_html.unescape(m.group(1))).strip()
++        title = _clean_text(m.group(2))
++        if not url.startswith('http') or not title:
++            continue
++        s = re.search(r'<p[^>]*>(.*?)</p>', chunk[m.end():], re.S)
++        results.append(SearchResult(title, url, _clean_text(s.group(1))[:400] if s else ''))
++        if len(results) >= limit:
++            break
++    return results
++
++
+ def parse_baidu_html(page: str, limit: int) -> list[SearchResult]:
+     results: list[SearchResult] = []
+     seen: set[str] = set()
+@@ -155,7 +190,7 @@ def html_to_text(page: str) -> str:
+ 
+ # 免 Key 引擎靠抓网页，频繁请求会被要求人机验证（不会也不应自动绕过）：
+ # 一个失败时自动换另一个兜底，两个都失败才报错。
+-_FREE_FALLBACK = {'baidu': 'duckduckgo', 'duckduckgo': 'baidu'}
++_FREE_FALLBACK = {'baidu': 'duckduckgo', 'duckduckgo': 'baidu', 'bing': 'baidu'}
+ _CAPTCHA_HINT = '，请稍后再试；需要稳定联网可在 AI 设置里改用博查 / Tavily'
+ 
+ 
+@@ -198,6 +233,13 @@ def _search_engine(engine, query, limit, settings, timeout, verify_ssl) -> list[
+                                {'Authorization': f'Bearer {key}'}, timeout=timeout, verify_ssl=verify_ssl)
+         return [SearchResult(str(r.get('title', '')), str(r.get('url', '')), str(r.get('content', ''))[:600])
+                 for r in (data or {}).get('results', [])[:limit] if isinstance(r, dict)]
++    if engine == 'bing':
++        page, _ = _http_get('https://cn.bing.com/search?q=' + urllib.parse.quote(query) + '&mkt=zh-CN',
++                            timeout=timeout, verify_ssl=verify_ssl)
++        head = page[:6000].lower()
++        if 'captcha' in head or 'b_challenge' in head:
++            raise WebSearchError('Bing 要求人机验证' + _CAPTCHA_HINT)
++        return parse_bing_html(page, limit)
+     page, _ = _http_get('https://html.duckduckgo.com/html/?q=' + urllib.parse.quote(query), timeout=timeout, verify_ssl=verify_ssl)
+     if 'anomaly-modal' in page or 'bots use DuckDuckGo too' in page:
+         raise WebSearchError('DuckDuckGo 要求人机验证' + _CAPTCHA_HINT)
+-- 
+2.53.0
+

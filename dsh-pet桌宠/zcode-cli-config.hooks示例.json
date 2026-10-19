@@ -1,0 +1,98 @@
+{
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "SessionStart": [
+        {
+          "hooks": [
+            {
+              "type": "process",
+              "command": "/home/dongyu/apps/dsh-pet/pet-zcode-hook.py",
+              "args": ["SessionStart"],
+              "timeoutMs": 5000,
+              "statusMessage": "同步桌宠联动状态"
+            }
+          ]
+        }
+      ],
+      "UserPromptSubmit": [
+        {
+          "hooks": [
+            {
+              "type": "process",
+              "command": "/home/dongyu/apps/dsh-pet/pet-zcode-hook.py",
+              "args": ["UserPromptSubmit"],
+              "timeoutMs": 5000,
+              "statusMessage": "同步桌宠联动状态"
+            }
+          ]
+        }
+      ],
+      "PreToolUse": [
+        {
+          "hooks": [
+            {
+              "type": "process",
+              "command": "/home/dongyu/apps/dsh-pet/pet-zcode-hook.py",
+              "args": ["PreToolUse"],
+              "timeoutMs": 5000,
+              "statusMessage": "同步桌宠联动状态"
+            }
+          ]
+        }
+      ],
+      "PostToolUse": [
+        {
+          "hooks": [
+            {
+              "type": "process",
+              "command": "/home/dongyu/apps/dsh-pet/pet-zcode-hook.py",
+              "args": ["PostToolUse"],
+              "timeoutMs": 5000,
+              "statusMessage": "同步桌宠联动状态"
+            }
+          ]
+        }
+      ],
+      "PostToolUseFailure": [
+        {
+          "hooks": [
+            {
+              "type": "process",
+              "command": "/home/dongyu/apps/dsh-pet/pet-zcode-hook.py",
+              "args": ["PostToolUseFailure"],
+              "timeoutMs": 5000,
+              "statusMessage": "同步桌宠联动状态"
+            }
+          ]
+        }
+      ],
+      "PermissionRequest": [
+        {
+          "hooks": [
+            {
+              "type": "process",
+              "command": "/home/dongyu/apps/dsh-pet/pet-zcode-hook.py",
+              "args": ["PermissionRequest"],
+              "timeoutMs": 5000,
+              "statusMessage": "同步桌宠联动状态"
+            }
+          ]
+        }
+      ],
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "process",
+              "command": "/home/dongyu/apps/dsh-pet/pet-zcode-hook.py",
+              "args": ["Stop"],
+              "timeoutMs": 5000,
+              "statusMessage": "同步桌宠联动状态"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

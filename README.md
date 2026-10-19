@@ -12,6 +12,10 @@
 | [codex-zh-linux/](codex-zh-linux/) | Codex 桌面应用（Linux）简体中文界面补丁，翻转 app.asar 内置 i18n 开关 | `sudo bash codex-zh-linux.sh` |
 | [hermes-install/](hermes-install/) | Hermes Agent 更新用的本地 PyPI 加速代理（TLS 改写 → 清华镜像） | 见该目录 README |
 | [sogou-wechat-qq/](sogou-wechat-qq/) | 搜狗输入法 + 微信 + QQ 三件套（26.04 Wayland，绕过 im-config 无 fcitx4 等三坑；含 QQ 官方直链 GetSign 签名下载脚本） | `bash download-debs.sh` → `sudo bash install-sogou-wechat-qq.sh` |
+| [clamav安装/](clamav安装/) | ClamAV 杀毒（按需扫描方案，不装常驻 clamd；含下载目录/共用分区扫描脚本） | `sudo bash 01-install.sh` |
+| [dsh-pet桌宠/](dsh-pet桌宠/) | dsh-pet 桌宠 + hermes/codex/zcode 三 Agent 联动（接线说明、hook/桥接脚本、7 个本地源码补丁） | 见 README-安装与联动说明.md |
+| [system-update-cleanup/](system-update-cleanup/) | 系统更新 + 垃圾清理一键脚本（apt 全量升级、snap 清旧版、日志收缩，幂等） | `sudo bash update-and-clean.sh` |
+| [系统镜像快照/](系统镜像快照/) | dd+zstd 整分区系统镜像一键快照（存共用 NTFS，自动生成还原脚本） | `sudo bash 创建系统镜像快照.sh` |
 
 每个目录内的 `README.md` 记录背景、用法、回滚方式和当时的踩坑要点。
 

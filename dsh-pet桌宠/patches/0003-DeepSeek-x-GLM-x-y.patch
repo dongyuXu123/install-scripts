@@ -1,0 +1,124 @@
+From 850a6211cd840660d76bf4d38420d2dc1acf5d51 Mon Sep 17 00:00:00 2001
+From: dongyu <dongyu@local>
+Date: Mon, 19 Oct 2026 13:25:15 +0800
+Subject: [PATCH 3/7] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
+ =?UTF-8?q?=EF=BC=9A=E7=81=B5=E5=8A=A8=E5=B2=9B=E4=BD=99=E9=A2=9D=E7=B4=A7?=
+ =?UTF-8?q?=E5=87=91=E5=8D=95=E8=A1=8C(DeepSeek:=20=E4=BD=99=E9=A2=9D=20?=
+ =?UTF-8?q?=C2=A5x=EF=BC=9BGLM:=20=E4=BD=99=E9=A2=9D=20x%(=E6=9C=AC?=
+ =?UTF-8?q?=E5=91=A8=E4=BD=99=E9=A2=9D:=20y%))?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ pet/app.py     |  2 +-
+ pet/balance.py | 58 +++++++++++++++++++++++++++-----------------------
+ 2 files changed, 32 insertions(+), 28 deletions(-)
+
+diff --git a/pet/app.py b/pet/app.py
+index 8c69ed4..3d20d2f 100644
+--- a/pet/app.py
++++ b/pet/app.py
+@@ -3718,7 +3718,7 @@ class AppShell:
+                 info = balance_mod.fetch_balance(base_url, api_key, verify_ssl=verify_ssl)
+                 lines.append(balance_mod.format_balance(info))
+                 first_info = info
+-            payload = {"text": '\n'.join(lines), "info": first_info}
++            payload = {"text": '；'.join(lines), "info": first_info}
+             self._balance_cache = (time.monotonic(), payload, provider_key)
+             self._write_balance_file_cache(payload, provider_key)
+             bridge.done.emit(True, payload)
+diff --git a/pet/balance.py b/pet/balance.py
+index 8f0bf55..b8140be 100644
+--- a/pet/balance.py
++++ b/pet/balance.py
+@@ -129,18 +129,19 @@ def fetch_balance(base_url: str, api_key: str, timeout: float = 10.0,
+ 
+ 
+ def _zhipu_quota_text(data) -> str:
+-    """把智谱配额响应体解析成人类可读文本（纯函数，便于测试）。
++    """把智谱配额响应体解析成紧凑文本（纯函数，便于测试）。
+ 
+-    实测形态（与 cc-switch 一致）：data.limits[].{type,unit,number,percentage,
+-    nextResetTime}；unit 3 = 5 小时滚动窗口、6 = 本周窗口（只锚定 unit 不绑
+-    number）；data.level 是套餐档位。无可用条目抛 BalanceError。
++    实测形态（与 cc-switch 一致）：data.limits[].{type,unit,number,percentage}；
++    unit 3 = 5 小时滚动窗口、6 = 本周窗口（只锚定 unit 不绑 number）。
++    展示口径是**剩余百分比**（100 - percentage），无可用条目抛 BalanceError。
+     """
+     if not isinstance(data, dict):
+         raise BalanceError('返回数据无效')
+     if data.get('success') is False:
+         raise BalanceError(str(data.get('msg') or '配额查询失败'))
+     node = data.get('data') if isinstance(data.get('data'), dict) else {}
+-    parts = []
++    main_rem = None
++    weekly_rem = None
+     for item in node.get('limits') or []:
+         if not isinstance(item, dict):
+             continue
+@@ -150,24 +151,23 @@ def _zhipu_quota_text(data) -> str:
+             pct = float(item.get('percentage'))
+         except (TypeError, ValueError):
+             continue
+-        unit = item.get('unit')
+-        if unit == 3:
+-            name = '5小时窗口'
+-        elif unit == 6:
+-            name = '本周窗口'
+-        else:
+-            name = f'窗口{item.get("number") or ""}'
+-        reset = ''
+-        ts = item.get('nextResetTime')
+-        try:
+-            reset = '，' + datetime.fromtimestamp(float(ts) / 1000.0, _BEIJING_TZ).strftime('%m-%d %H:%M') + ' 重置'
+-        except (TypeError, ValueError, OSError, OverflowError):
+-            pass
+-        parts.append(f'{name}已用 {pct:.0f}%{reset}')
+-    if not parts:
++        remaining = max(0.0, min(100.0, 100.0 - pct))
++        if item.get('unit') == 3:
++            if main_rem is None:
++                main_rem = remaining
++        elif item.get('unit') == 6:
++            if weekly_rem is None:
++                weekly_rem = remaining
++        elif main_rem is None:
++            main_rem = remaining
++    if main_rem is None and weekly_rem is None:
+         raise BalanceError('响应中没有配额信息：' + json.dumps(data, ensure_ascii=False)[:200])
+-    level = str(node.get('level') or '').strip()
+-    return (f'[{level}] ' if level else '') + '；'.join(parts)
++    text = ''
++    if main_rem is not None:
++        text += f'余额 {main_rem:.0f}%'
++    if weekly_rem is not None:
++        text += f'（本周余额: {weekly_rem:.0f}%）'
++    return text
+ 
+ 
+ def _fetch_zhipu_quota(api_key: str, timeout: float = 10.0,
+@@ -219,11 +219,15 @@ def format_balance(info: dict) -> str:
+ 
+ 
+ def format_balance_labeled(label: str, info: dict) -> str:
+-    """多供应商余额行：'DeepSeek：余额 ¥12.34（…）'（本地补丁）。"""
+-    body = format_balance(info)
+-    if body == '余额信息为空':
+-        return body
+-    return f'{label}：{body}'
++    """多供应商余额行（本地补丁，紧凑格式）：
++    'DeepSeek: 余额 ¥12.34'；智谱配额行 'GLM: 余额 55%（本周余额: 59%）'。"""
++    quota = str(info.get('quota_text', '') or '')
++    if quota:
++        return f'{label}: {quota}'
++    total = str(info.get('total', '') or '')
++    if not total:
++        return f'{label}: 余额信息为空'
++    return f'{label}: 余额 ¥{total}'
+ 
+ 
+ def balance_percent(total: str | float | None) -> float | None:
+-- 
+2.53.0
+

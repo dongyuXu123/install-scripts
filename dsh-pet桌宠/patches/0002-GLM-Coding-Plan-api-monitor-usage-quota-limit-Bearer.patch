@@ -1,0 +1,201 @@
+From 743834773b2b125e2a2a6c4e3ca4d0ba750b61ae Mon Sep 17 00:00:00 2001
+From: dongyu <dongyu@local>
+Date: Mon, 19 Oct 2026 12:57:17 +0800
+Subject: [PATCH 2/7] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
+ =?UTF-8?q?=EF=BC=9AGLM=20=E4=BD=99=E9=A2=9D=E6=94=B9=E7=94=A8=20Coding=20?=
+ =?UTF-8?q?Plan=20=E9=85=8D=E9=A2=9D=E6=8E=A5=E5=8F=A3(/api/monitor/usage/?=
+ =?UTF-8?q?quota/limit,=E6=97=A0Bearer,5=E5=B0=8F=E6=97=B6/=E6=9C=AC?=
+ =?UTF-8?q?=E5=91=A8=E7=AA=97=E5=8F=A3=E7=99=BE=E5=88=86=E6=AF=94)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ pet/balance.py | 147 +++++++++++++++++++++++++++++++++----------------
+ 1 file changed, 99 insertions(+), 48 deletions(-)
+
+diff --git a/pet/balance.py b/pet/balance.py
+index 60dba81..8f0bf55 100644
+--- a/pet/balance.py
++++ b/pet/balance.py
+@@ -24,19 +24,13 @@ from html import escape
+ from zoneinfo import ZoneInfo
+ 
+ BALANCE_PATH = '/user/balance'
++ZHIPU_QUOTA_PATH = '/api/monitor/usage/quota/limit'
+ 
+ 
+-def _balance_endpoint(base_url: str) -> str:
+-    """按厂商映射余额端点（本地补丁，支持多供应商余额）。
+-
+-    - DeepSeek 及其它 OpenAI 风格平台：``base_url + /user/balance``
+-    - 智谱 open.bigmodel.cn：余额接口与聊天 base 不同源，
+-      固定为 https://open.bigmodel.cn/api/paas/v4/users/me/balance
+-    """
+-    base = str(base_url or '').strip().rstrip('/')
+-    if 'bigmodel.cn' in base:
+-        return 'https://open.bigmodel.cn/api/paas/v4/users/me/balance'
+-    return base + BALANCE_PATH
++def _is_zhipu(base_url: str) -> bool:
++    """智谱 GLM（open.bigmodel.cn）：Coding Plan 账号按套餐配额展示，
++    不走按量付费的 /user/balance（套餐账号访问它会报「余额不足或无可用资源包」）。"""
++    return 'bigmodel.cn' in str(base_url or '')
+ 
+ # DeepSeek 满额基准（¥）：余额 ≥ 该值视为 100%（未消耗），余额按比例折算为已用百分比
+ DEEPSEEK_FULL_BALANCE_CNY = 20.0
+@@ -89,12 +83,17 @@ def _pick_balance_info(infos):
+ 
+ def fetch_balance(base_url: str, api_key: str, timeout: float = 10.0,
+                   verify_ssl: bool = True) -> dict:
+-    """查询余额。
++    """查询余额/配额。
+ 
+-    返回 {'is_available': bool, 'total': str, 'granted': str, 'topped_up': str}；
++    DeepSeek 等 OpenAI 风格平台返回 {'is_available','total','granted','topped_up'}；
++    智谱 Coding Plan 账号返回 {'quota_text': ...}（按 5 小时/本周窗口展示已用百分比）。
+     未配置 Key / 端点不支持 / 网络失败抛 BalanceError。
+     """
+-    endpoint = _balance_endpoint(base_url)
++    if not api_key:
++        raise BalanceError('未配置 API Key')
++    if _is_zhipu(base_url):
++        return _fetch_zhipu_quota(api_key, timeout=timeout, verify_ssl=verify_ssl)
++    endpoint = str(base_url or '').strip().rstrip('/') + BALANCE_PATH
+     if not api_key:
+         raise BalanceError('未配置 API Key')
+     from .chat.providers import build_browser_headers  # 延迟导入：无 Chat 变体排除 pet.chat
+@@ -118,45 +117,97 @@ def fetch_balance(base_url: str, api_key: str, timeout: float = 10.0,
+     except (OSError, ValueError) as exc:
+         raise BalanceError(f'返回数据无效：{exc}') from exc
+     infos = data.get('balance_infos') if isinstance(data, dict) else None
+-    if infos:
+-        info = _pick_balance_info(infos)
+-        return {
+-            'is_available': bool(data.get('is_available', True)),
+-            'total': str(info.get('total_balance', '')),
+-            'granted': str(info.get('granted_balance', '')),
+-            'topped_up': str(info.get('topped_up_balance', '')),
+-        }
+-    zhipu = _parse_zhipu_balance(data)
+-    if zhipu is not None:
+-        return zhipu
+-    preview = json.dumps(data, ensure_ascii=False)[:200] if isinstance(data, (dict, list)) else str(data)[:200]
+-    raise BalanceError(f'响应中没有余额信息：{preview}')
+-
+-
+-def _parse_zhipu_balance(data):
+-    """智谱开放平台余额格式（/api/paas/v4/users/me/balance，非 DeepSeek 形态）。
+-
+-    字段位置按常见形态容错识别（data 包一层或顶层；total_balance/balance/total），
+-    识别失败返回 None 由调用方报错。返回与 DeepSeek 相同的 info 字典形状。
++    if not infos:
++        raise BalanceError('响应中没有余额信息')
++    info = _pick_balance_info(infos)
++    return {
++        'is_available': bool(data.get('is_available', True)),
++        'total': str(info.get('total_balance', '')),
++        'granted': str(info.get('granted_balance', '')),
++        'topped_up': str(info.get('topped_up_balance', '')),
++    }
++
++
++def _zhipu_quota_text(data) -> str:
++    """把智谱配额响应体解析成人类可读文本（纯函数，便于测试）。
++
++    实测形态（与 cc-switch 一致）：data.limits[].{type,unit,number,percentage,
++    nextResetTime}；unit 3 = 5 小时滚动窗口、6 = 本周窗口（只锚定 unit 不绑
++    number）；data.level 是套餐档位。无可用条目抛 BalanceError。
+     """
+     if not isinstance(data, dict):
+-        return None
+-    node = data.get('data') if isinstance(data.get('data'), dict) else data
+-    total = ''
+-    for key in ('total_balance', 'balance', 'total', 'available_balance'):
+-        value = node.get(key)
+-        if value not in (None, ''):
+-            total = str(value)
+-            break
+-    if not total:
+-        return None
+-    granted = str(node.get('granted_balance', '') or '')
+-    topped = str(node.get('topped_up_balance', '') or node.get('topped_up', '') or '')
+-    return {'is_available': True, 'total': total, 'granted': granted, 'topped_up': topped}
++        raise BalanceError('返回数据无效')
++    if data.get('success') is False:
++        raise BalanceError(str(data.get('msg') or '配额查询失败'))
++    node = data.get('data') if isinstance(data.get('data'), dict) else {}
++    parts = []
++    for item in node.get('limits') or []:
++        if not isinstance(item, dict):
++            continue
++        if str(item.get('type', '')).upper() not in ('TOKENS_LIMIT', 'CREDIT_LIMIT'):
++            continue
++        try:
++            pct = float(item.get('percentage'))
++        except (TypeError, ValueError):
++            continue
++        unit = item.get('unit')
++        if unit == 3:
++            name = '5小时窗口'
++        elif unit == 6:
++            name = '本周窗口'
++        else:
++            name = f'窗口{item.get("number") or ""}'
++        reset = ''
++        ts = item.get('nextResetTime')
++        try:
++            reset = '，' + datetime.fromtimestamp(float(ts) / 1000.0, _BEIJING_TZ).strftime('%m-%d %H:%M') + ' 重置'
++        except (TypeError, ValueError, OSError, OverflowError):
++            pass
++        parts.append(f'{name}已用 {pct:.0f}%{reset}')
++    if not parts:
++        raise BalanceError('响应中没有配额信息：' + json.dumps(data, ensure_ascii=False)[:200])
++    level = str(node.get('level') or '').strip()
++    return (f'[{level}] ' if level else '') + '；'.join(parts)
++
++
++def _fetch_zhipu_quota(api_key: str, timeout: float = 10.0,
++                       verify_ssl: bool = True) -> dict:
++    """智谱 GLM Coding Plan 配额查询（cc-switch 同款接口，本地补丁）。
++
++    GET https://open.bigmodel.cn/api/monitor/usage/quota/limit
++    注意鉴权头**不带** Bearer 前缀（智谱此处只认裸 key）。
++    """
++    from .chat.providers import build_browser_headers  # 延迟导入：无 Chat 变体排除 pet.chat
++    endpoint = 'https://open.bigmodel.cn' + ZHIPU_QUOTA_PATH
++    headers = build_browser_headers({
++        'Authorization': api_key,
++        'Accept': 'application/json',
++        'Accept-Language': 'en-US,en',
++    })
++    req = urllib.request.Request(endpoint, headers=headers)
++    try:
++        with urllib.request.urlopen(req, timeout=timeout,
++                                    context=_ssl_context(verify_ssl)) as resp:
++            data = json.loads(resp.read().decode('utf-8'))
++    except urllib.error.HTTPError as exc:
++        raise BalanceError(f'HTTP {exc.code}') from exc
++    except (socket.timeout, TimeoutError) as exc:
++        raise BalanceError('请求超时') from exc
++    except urllib.error.URLError as exc:
++        raise BalanceError(f'网络连接失败：{exc.reason}') from exc
++    except json.JSONDecodeError as exc:
++        raise BalanceError('返回数据无效') from exc
++    except (OSError, ValueError) as exc:
++        raise BalanceError(f'返回数据无效：{exc}') from exc
++    return {'is_available': True, 'total': '', 'granted': '', 'topped_up': '',
++            'quota_text': _zhipu_quota_text(data)}
+ 
+ 
+ def format_balance(info: dict) -> str:
+-    """'余额 ¥12.34（充值 10.00 / 赠送 2.34）'；单一余额时简化。"""
++    """配额行（智谱）原样透出；否则 '余额 ¥12.34（充值 10.00 / 赠送 2.34）'。"""
++    quota = str(info.get('quota_text', '') or '')
++    if quota:
++        return quota
+     total = str(info.get('total', '') or '')
+     granted = str(info.get('granted', '') or '')
+     topped = str(info.get('topped_up', '') or '')
+-- 
+2.53.0
+

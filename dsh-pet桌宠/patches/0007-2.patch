@@ -1,0 +1,91 @@
+From 3c06494b86c7831b058e0e84c5462d9e16eceecd Mon Sep 17 00:00:00 2001
+From: dongyu <dongyu@local>
+Date: Mon, 19 Oct 2026 14:07:25 +0800
+Subject: [PATCH 7/7] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
+ =?UTF-8?q?=EF=BC=9A=E4=BD=99=E9=A2=9D=E5=88=B7=E6=96=B0=E5=85=A8=E9=9D=99?=
+ =?UTF-8?q?=E9=BB=98=E5=8C=96=E2=80=94=E2=80=94=E5=90=8E=E5=8F=B0=E5=AE=9A?=
+ =?UTF-8?q?=E6=97=B6=E6=9F=A5=E8=AF=A2(=E9=BB=98=E8=AE=A42=E5=88=86?=
+ =?UTF-8?q?=E9=92=9F)=E5=B0=B1=E5=9C=B0=E6=9B=B4=E6=96=B0=EF=BC=8C?=
+ =?UTF-8?q?=E7=A7=BB=E9=99=A4=E6=9F=A5=E8=AF=A2=E4=B8=AD/=E5=88=9A?=
+ =?UTF-8?q?=E5=88=9A=E6=9F=A5=E8=AF=A2=E8=BF=87=E6=96=87=E6=A1=88=EF=BC=8C?=
+ =?UTF-8?q?=E5=A4=B1=E8=B4=A5=E4=BF=9D=E7=95=99=E6=97=A7=E5=80=BC?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ pet/app.py | 28 +++++++++++++++++-----------
+ 1 file changed, 17 insertions(+), 11 deletions(-)
+
+diff --git a/pet/app.py b/pet/app.py
+index 04c5c87..9bddb3b 100644
+--- a/pet/app.py
++++ b/pet/app.py
+@@ -135,7 +135,9 @@ class _QuietBalanceBridge(_BackgroundResult):
+         if ok:
+             owner._update_island_balance(payload, animate=False)
+         else:
+-            island.set_balance_info(owner._island_tier_hint(), "余额查询失败")
++            # 本地补丁：静默通道失败**保留上次显示**（多为瞬时网络抖动），
++            # 不用「余额查询失败」覆盖好数据；下一拍定时器会自动重试。
++            logging.info("静默余额查询失败，保留上次显示（后台稍后重试）")
+ 
+ 
+ def _persona_picker(win):
+@@ -1298,7 +1300,9 @@ class AppShell:
+         # （_on_session_end）与 main() 的 finally。
+         self._overlay_gate = overlay_gate
+         self._balance_timer = QTimer()
+-        self._balance_timer.timeout.connect(self.show_balance)
++        # 本地补丁：定时刷新改走静默通道——后台查询、查到就地更新岛卡片，
++        # 不冒泡、不弹「查询中/刚刚查询过」之类过程文案
++        self._balance_timer.timeout.connect(self._quiet_balance_refresh)
+         self._update_bridge = None
+         self._balance_cache_path = config.dir / 'balance_cache.json'  # 跨实例共享余额缓存（按 provider 绑定）
+         # 待办提醒：进程级单例（多窗共用一个调度器，避免每窗一个定时器重复通知），
+@@ -3510,8 +3514,11 @@ class AppShell:
+     def _apply_balance_timer(self) -> None:
+         self._balance_timer.stop()
+         minutes = max(0, int(self.config.get("balance_refresh_minutes", 0) or 0))
+-        if minutes:
+-            self._balance_timer.start(minutes * 60000)
++        # 本地补丁：自动刷新默认常开（未配置时 2 分钟一拍，走静默通道不打扰）；
++        # 用户显式配置了分钟数则按配置走。启动后 3s 先做一次，岛不用等首拍。
++        interval_seconds = minutes * 60 if minutes else 120
++        self._balance_timer.start(interval_seconds * 1000)
++        QTimer.singleShot(3000, self._quiet_balance_refresh)
+ 
+     def _island_icon_pixmap(self):
+         """灵动岛"鱼本体头像"：取首个桌宠窗的当前帧图标；无窗/无帧返回 None（岛侧会重试）。
+@@ -3574,10 +3581,12 @@ class AppShell:
+             self.island.notify_event("balance")
+ 
+     def _quiet_balance_refresh(self, *, force: bool = False) -> None:
+-        """灵动岛卡片展开时的静默余额刷新：不冒泡、不播动画，只更新岛卡片。
++        """灵动岛余额后台静默刷新（本地补丁改造）：全程不打扰既有文案。
+ 
+-        30s 内存/文件缓存命中直接用；否则后台查询（60s 节流，查询忙时跳过）。
+-        未配置 API Key 时明确提示，不再停留 "余额 --"。
++        30s 内存/文件缓存命中直接用；否则后台查询（60s 节流，忙时跳过），
++        查到结果由 _QuietBalanceBridge 就地更新岛卡片。查询期间**保留旧值**，
++        不再显示「查询中…」「刚刚查询过，稍后自动更新」之类过程文案；
++        定时器（默认 2 分钟一拍）与卡片展开两条路径共用本入口。
+         """
+         island = getattr(self, "island", None)
+         if island is None or getattr(self, "_quiet_balance_busy", False):
+@@ -3611,11 +3620,8 @@ class AppShell:
+             return
+         last = getattr(self, "_quiet_balance_last", None)
+         if not force and last is not None and now - last < 60.0:
+-            # 节流命中且缓存已过期：明示状态，不停留在旧值上装死
+-            island.set_balance_info(self._island_tier_hint(), "刚刚查询过，稍后自动更新")
+-            return
++            return  # 节流命中：静默跳过，保留旧值，不弹过程文案
+         self._quiet_balance_last = now
+-        island.set_balance_info(self._island_tier_hint(), "查询中…")
+         bridge = _QuietBalanceBridge(owner=self)
+         self._quiet_balance_bridge = bridge
+         self._quiet_balance_busy = True  # 独立忙标志：不占显式查询的闸门
+-- 
+2.53.0
+

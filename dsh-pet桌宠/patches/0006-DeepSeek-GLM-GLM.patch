@@ -1,0 +1,261 @@
+From ff185e0821d967ad9f74f961fa7264ae420410a3 Mon Sep 17 00:00:00 2001
+From: dongyu <dongyu@local>
+Date: Mon, 19 Oct 2026 13:56:35 +0800
+Subject: [PATCH 6/7] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
+ =?UTF-8?q?=EF=BC=9A=E7=81=B5=E5=8A=A8=E5=B2=9B=E5=8D=A1=E7=89=87=E6=8B=86?=
+ =?UTF-8?q?=E5=8F=8C=E5=AE=B9=E5=99=A8(DeepSeek=E4=BF=A1=E6=81=AF+?=
+ =?UTF-8?q?=E5=B3=B0=E8=B0=B7=E7=8A=B6=E6=80=81=20/=20GLM=E4=BF=A1?=
+ =?UTF-8?q?=E6=81=AF+=E9=87=8D=E7=BD=AE=E7=8A=B6=E6=80=81)=EF=BC=8CGLM?=
+ =?UTF-8?q?=E5=AE=B9=E5=99=A8=E6=97=A0=E6=95=B0=E6=8D=AE=E8=87=AA=E5=8A=A8?=
+ =?UTF-8?q?=E9=9A=90=E8=97=8F?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ pet/app.py            | 28 +++++++++++++++++++-----
+ pet/balance.py        | 19 ++++++++--------
+ pet/dynamic_island.py | 51 ++++++++++++++++++++++++++++++++++++++-----
+ 3 files changed, 77 insertions(+), 21 deletions(-)
+
+diff --git a/pet/app.py b/pet/app.py
+index b311f39..04c5c87 100644
+--- a/pet/app.py
++++ b/pet/app.py
+@@ -3561,10 +3561,15 @@ class AppShell:
+             return
+         text = "余额 --"
+         card_text = None
++        glm_line = None
++        glm_status = None
+         if isinstance(payload, dict):
+             text = str(payload.get("text") or "余额 --")
+             card_text = str(payload.get("card_text") or "") or None
+-        self.island.set_balance_info(self._island_tier_hint(), text, card_text)
++            glm_line = str(payload.get("glm_line") or "") or None
++            glm_status = str(payload.get("glm_status") or "") or None
++        self.island.set_balance_info(self._island_tier_hint(), text, card_text,
++                                     glm_line, glm_status)
+         if animate:
+             self.island.notify_event("balance")
+ 
+@@ -3700,7 +3705,9 @@ class AppShell:
+             except Exception:
+                 entries = []
+             lines = []
+-            card_lines = []
++            ds_line = ''
++            glm_line = ''
++            glm_status = ''
+             first_info = {}
+             for provider in entries:
+                 label = str(getattr(provider, 'name', '') or getattr(provider, 'provider_id', ''))
+@@ -3713,18 +3720,27 @@ class AppShell:
+                 try:
+                     info = balance_mod.fetch_balance(provider.base_url, key, verify_ssl=verify_ssl)
+                     lines.append(balance_mod.format_balance_labeled(label, info))
+-                    card_lines.append(balance_mod.format_balance_card_labeled(label, info))
++                    full_line = balance_mod.format_balance_card_labeled(label, info)
++                    if not ds_line:
++                        ds_line = full_line
++                    elif not glm_line:
++                        glm_line = full_line
++                        glm_status = str(info.get('quota_status', '') or '')
+                     if not first_info:
+                         first_info = info
+                 except Exception as exc:  # noqa: BLE001 - 单一厂商失败不影响其它行
+                     lines.append(f'{label}: 查询失败（{exc}）')
+-                    card_lines.append(f'{label}：查询失败（{exc}）')
++                    if not ds_line:
++                        ds_line = f'{label}：查询失败（{exc}）'
++                    elif not glm_line:
++                        glm_line = f'{label}：查询失败（{exc}）'
+             if not lines:
+                 info = balance_mod.fetch_balance(base_url, api_key, verify_ssl=verify_ssl)
+                 lines.append(balance_mod.format_balance(info))
+-                card_lines.append(balance_mod.format_balance(info))
++                ds_line = balance_mod.format_balance(info)
+                 first_info = info
+-            payload = {"text": '；'.join(lines), "card_text": '\n'.join(card_lines), "info": first_info}
++            payload = {"text": '；'.join(lines), "card_text": ds_line,
++                       "glm_line": glm_line, "glm_status": glm_status, "info": first_info}
+             self._balance_cache = (time.monotonic(), payload, provider_key)
+             self._write_balance_file_cache(payload, provider_key)
+             bridge.done.emit(True, payload)
+diff --git a/pet/balance.py b/pet/balance.py
+index e555b5f..758d595 100644
+--- a/pet/balance.py
++++ b/pet/balance.py
+@@ -180,13 +180,12 @@ def _zhipu_quota_parts(data) -> dict:
+         card += f'（本周余额： {weekly[0]:.0f}%）'
+     main_reset = main[1] if main is not None else None
+     weekly_reset = weekly[1] if weekly is not None else None
++    status_parts = []
+     if main_reset is not None:
+-        card += f'，{main_reset:%m-%d %H:%M} 重置'
+-        if weekly_reset is not None:
+-            card += f'（{weekly_reset:%m-%d %H:%M} 本周重置）'
+-    elif weekly_reset is not None:
+-        card += f'，{weekly_reset:%m-%d %H:%M} 本周重置'
+-    return {'text': text, 'card_text': card}
++        status_parts.append(f'{main_reset:%m-%d %H:%M} 重置')
++    if weekly_reset is not None:
++        status_parts.append(f'本周 {weekly_reset:%m-%d %H:%M} 重置')
++    return {'text': text, 'quota_status': ' · '.join(status_parts)}
+ 
+ 
+ def _zhipu_quota_text(data) -> str:
+@@ -225,7 +224,7 @@ def _fetch_zhipu_quota(api_key: str, timeout: float = 10.0,
+         raise BalanceError(f'返回数据无效：{exc}') from exc
+     parts = _zhipu_quota_parts(data)
+     return {'is_available': True, 'total': '', 'granted': '', 'topped_up': '',
+-            'quota_text': parts['text'], 'quota_card_text': parts['card_text']}
++            'quota_text': parts['text'], 'quota_status': parts['quota_status']}
+ 
+ 
+ def format_balance(info: dict) -> str:
+@@ -256,9 +255,9 @@ def format_balance_labeled(label: str, info: dict) -> str:
+ 
+ 
+ def format_balance_card_labeled(label: str, info: dict) -> str:
+-    """展开卡完整行（本地补丁）：DeepSeek 带充值/赠送明细；
+-    GLM 带最近重置时间。文本供灵动岛卡片逐行展示。"""
+-    quota = str(info.get('quota_card_text', '') or '')
++    """展开卡完整行（本地补丁）：GLM 走配额紧凑文本（状态行由 quota_status 单独
++    渲染）；其余供应商带充值/赠送明细。"""
++    quota = str(info.get('quota_text', '') or '')
+     if quota:
+         return f'{label}：{quota}'
+     return f'{label}：{format_balance(info)}'
+diff --git a/pet/dynamic_island.py b/pet/dynamic_island.py
+index ff197cd..bbd8fa9 100644
+--- a/pet/dynamic_island.py
++++ b/pet/dynamic_island.py
+@@ -545,7 +545,9 @@ class DynamicIsland(QWidget):
+         self._press_global: QPoint | None = None
+         self._balance_tier_text = "余额峰谷 --"
+         self._balance_text = "余额 --"
+-        self._balance_card_text = "余额 --"   # 展开卡余额文本（本地补丁：可多行完整信息）
++        self._balance_card_text = "余额 --"   # 展开卡 DeepSeek 容器文本（本地补丁）
++        self._balance_glm_line = ""           # GLM 容器信息行（本地补丁，空 = 整块隐藏）
++        self._balance_glm_status = ""         # GLM 容器状态行：配额窗口重置计划
+         self._pet_visible = True
+         # 本构建是否具备聊天能力（AppShell 按 enable_chat 喂入，默认 True
+         # 维持现状；纯桌宠版置 False 时 hidden_chat 单击路由回退展开卡片）
+@@ -914,11 +916,15 @@ class DynamicIsland(QWidget):
+         self._clear_icon_cache()
+         self.update()
+ 
+-    def set_balance_info(self, tier_text: str, balance_text: str, card_text: str | None = None) -> None:
++    def set_balance_info(self, tier_text: str, balance_text: str, card_text: str | None = None,
++                         glm_line: str | None = None, glm_status: str | None = None) -> None:
+         self._balance_tier_text = str(tier_text or "余额峰谷 --")
+         self._balance_text = str(balance_text or "余额 --")
+-        # 本地补丁：卡片可携带与顶栏不同的完整余额文本（多行，逐供应商一行）
++        # 本地补丁：卡片余额区拆两个容器——DeepSeek（主读数 + 峰谷状态）与
++        # GLM（glm_line 信息行 + glm_status 重置计划状态行，无数据整块隐藏）
+         self._balance_card_text = str(card_text) if card_text else self._balance_text
++        self._balance_glm_line = str(glm_line or '')
++        self._balance_glm_status = str(glm_status or '')
+         self._sync_card_labels()
+         self._refresh()
+ 
+@@ -1926,6 +1932,20 @@ class DynamicIsland(QWidget):
+                        self._card_status_row):
+             overview.addWidget(widget)
+ 
++        # ---- A2 GLM 容器（本地补丁）：信息行 + 状态行（配额重置计划），
++        # 无数据整块隐藏；分隔线 + 上下各一档间距，与 B/C 区同款节奏 ----
++        self._card_glm_box = QWidget(self._card_box)
++        glm = QVBoxLayout(self._card_glm_box)
++        glm.setContentsMargins(0, _CARD_SECTION_GAP, 0, 0)
++        glm.setSpacing(0)
++        glm.addWidget(_CardSeparator(self, self._card_glm_box))
++        glm.addSpacing(_CARD_SECTION_GAP)
++        self._card_glm_balance_label = QLabel(self._card_glm_box)
++        self._card_glm_tier_label = QLabel(self._card_glm_box)
++        glm.addWidget(self._card_glm_balance_label)
++        glm.addWidget(self._card_glm_tier_label)
++        self._card_glm_box.setVisible(False)
++
+         # ---- B 指标详情区：每段一行（段名 / 当前值合并串 / 单位·来源·更新时间）----
+         self._card_metrics = QWidget(self._card_box)
+         metrics = QVBoxLayout(self._card_metrics)
+@@ -1968,7 +1988,7 @@ class DynamicIsland(QWidget):
+             button_row.addWidget(btn)
+         actions.addLayout(button_row)
+ 
+-        for section in (self._card_overview, self._card_metrics,
++        for section in (self._card_overview, self._card_glm_box, self._card_metrics,
+                         self._card_message_box, self._card_actions):
+             layout.addWidget(section)
+         self._card_box.hide()
+@@ -1986,8 +2006,9 @@ class DynamicIsland(QWidget):
+         primary_color, secondary_color = QColor(primary), QColor(secondary)
+         # 字体走字号层（与胶囊同一份源）、颜色走主题函数：卡片不自己发明一套
+         self._card_balance_label.setFont(self._font_for("primary"))
++        self._card_glm_balance_label.setFont(self._font_for("primary"))
+         for label in (self._card_tier_label, self._card_status_label,
+-                      self._card_message_label):
++                      self._card_glm_tier_label, self._card_message_label):
+             label.setFont(self._font_for("aux"))
+         self._apply_card_style(self._card_balance_label,
+                                f"color: {primary_color.name()};")
+@@ -1995,6 +2016,10 @@ class DynamicIsland(QWidget):
+                                f"color: {secondary_color.name()};")
+         self._apply_card_style(self._card_status_label,
+                                f"color: {self._status_dot_color().name()};")
++        self._apply_card_style(self._card_glm_balance_label,
++                               f"color: {primary_color.name()};")
++        self._apply_card_style(self._card_glm_tier_label,
++                               f"color: {secondary_color.name()};")
+         self._apply_card_style(self._card_message_label,
+                                f"color: {secondary_color.name()};")
+         # 按钮：圆角 14px（= 按钮高 28 的一半）、accent 以 rgba 三档穿透做
+@@ -2021,6 +2046,11 @@ class DynamicIsland(QWidget):
+         self._card_balance_label.setText(self._balance_card_text)
+         self._card_tier_label.setText(self._balance_tier_text)
+         self._card_status_label.setText(self._card_status_text())
++        # ---- A2 GLM 容器 ----
++        glm_visible = bool(self._balance_glm_line)
++        self._card_glm_box.setVisible(glm_visible)
++        self._card_glm_balance_label.setText(self._balance_glm_line or "GLM --")
++        self._card_glm_tier_label.setText(self._balance_glm_status)
+         # ---- B 指标详情 ----
+         # 行数据**一趟只算一次**（每次都要过段管线与行计划）：往下传，别在
+         # 宽度/高度/文案各算一遍——每秒 tick 会走这条路，重复计算是白烧 CPU
+@@ -2085,6 +2115,15 @@ class DynamicIsland(QWidget):
+                 + _CARD_LINE_GAP + metrics.height()
+                 + _CARD_LINE_GAP + status_h)
+ 
++    def _card_glm_box_height(self) -> int:
++        """A2 GLM 容器高（本地补丁）：分隔线上下两档间距 + 1px 线 + 信息行 + 行距
++        + 状态行；无数据 = 0（整块隐藏不占位）。"""
++        if not self._balance_glm_line:
++            return 0
++        return (2 * _CARD_SECTION_GAP + _CARD_SEP_PX
++                + self._metrics_for("primary").height()
++                + _CARD_LINE_GAP + self._metrics_for("aux").height())
++
+     def _card_metrics_height(self, rows=None) -> int:
+         """B 区高 = 上下各一档分区间距 + 1px 分隔线 + N×行高；N=0 时整区不占位。"""
+         count = len(self._card_metric_rows() if rows is None else rows)
+@@ -2112,6 +2151,7 @@ class DynamicIsland(QWidget):
+         """
+         rows = self._card_metric_rows()
+         total = (_CARD_MARGIN_TOP + self._card_overview_height()
++                 + self._card_glm_box_height()
+                  + self._card_metrics_height(rows) + self._card_message_height()
+                  + self._card_actions_height() + _CARD_MARGIN_BOTTOM)
+         return total
+@@ -2122,6 +2162,7 @@ class DynamicIsland(QWidget):
+         metrics = self._metrics_for("aux")
+         lines = self._card_message_lines()
+         self._card_overview.setFixedHeight(self._card_overview_height())
++        self._card_glm_box.setFixedHeight(self._card_glm_box_height())
+         primary_metrics = self._metrics_for("primary")
+         card_lines = max(1, self._balance_card_text.count('\n') + 1)
+         self._card_balance_label.setFixedHeight(
+-- 
+2.53.0
+
