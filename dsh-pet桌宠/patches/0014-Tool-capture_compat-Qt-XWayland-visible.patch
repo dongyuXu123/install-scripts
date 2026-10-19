@@ -1,0 +1,40 @@
+From 51d9f79a89f6b8147f791b6c50027bfa38d1e275 Mon Sep 17 00:00:00 2001
+From: dongyu <dongyu@local>
+Date: Mon, 19 Oct 2026 21:42:16 +0800
+Subject: [PATCH 14/14] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
+ =?UTF-8?q?=EF=BC=9A=E6=B0=94=E6=B3=A1=E6=94=B9=E5=9B=9E=E7=8B=AC=E7=AB=8B?=
+ =?UTF-8?q?=E7=BD=AE=E9=A1=B6Tool=E7=AA=97=E5=8F=A3=E2=80=94=E2=80=94captu?=
+ =?UTF-8?q?re=5Fcompat=E5=AD=90=E6=8E=A7=E4=BB=B6=E6=A8=A1=E5=BC=8F?=
+ =?UTF-8?q?=E5=9C=A8=E6=9C=AC=E6=9C=BAQt/XWayland=E4=B8=8B=E4=B8=8D?=
+ =?UTF-8?q?=E8=BF=9B=E6=B8=B2=E6=9F=93=E7=BC=93=E5=86=B2(visible=E4=BD=86?=
+ =?UTF-8?q?=E4=B8=8D=E6=98=BE=E7=A4=BA)=EF=BC=8C=E5=AE=9E=E6=B5=8B?=
+ =?UTF-8?q?=E7=8B=AC=E7=AB=8B=E7=AA=97=E5=8F=A3=E6=B8=B2=E6=9F=93=E6=AD=A3?=
+ =?UTF-8?q?=E5=B8=B8?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ pet/window.py | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/pet/window.py b/pet/window.py
+index 17974d2..d5602ad 100644
+--- a/pet/window.py
++++ b/pet/window.py
+@@ -560,7 +560,11 @@ class PetWindow(QWidget, WindowFeatureGateMixin):
+         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+         if self._stream_capture_mode:
+             self.setWindowTitle(STREAM_CAPTURE_TITLE)
+-        self._speech_bubble.set_capture_compat(self._stream_capture_mode, host=self)
++        # 本地补丁：气泡保持独立置顶 Tool 窗口（capture_compat=False）。
++        # 本机实测（XWayland + 半透明主窗）：气泡作为主窗子控件时 visible=True、
++        # 几何正确，但永远不进入窗口渲染缓冲（XGetImage/肉眼均不可见）；独立
++        # Tool 窗口形态经抓帧验证显示正常。代价：OBS 捕获主窗时看不到气泡。
++        self._speech_bubble.set_capture_compat(False)
+         # Cocoa hides Tool windows when an accessory application deactivates.
+         # Visibility and z-order are separate: always keep the pet visible,
+         # then use WindowStaysOnTopHint/NSWindow level for the on-top setting.
+-- 
+2.53.0
+

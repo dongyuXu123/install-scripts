@@ -1,0 +1,73 @@
+From 2f63e49f2155773f57d43b3a7bc5f8e7f358da4f Mon Sep 17 00:00:00 2001
+From: dongyu <dongyu@local>
+Date: Mon, 19 Oct 2026 21:34:31 +0800
+Subject: [PATCH 13/14] =?UTF-8?q?=E6=9C=AC=E5=9C=B0=E8=A1=A5=E4=B8=81?=
+ =?UTF-8?q?=EF=BC=9A=E6=B0=94=E6=B3=A1=E6=98=BE=E7=A4=BA=E9=93=BE=E8=B7=AF?=
+ =?UTF-8?q?=E8=AF=8A=E6=96=AD=E6=97=A5=E5=BF=97(=E4=BF=AE=E5=A4=8DQRect.to?=
+ =?UTF-8?q?String=E5=B4=A9=E6=BA=83)+=E5=9B=BE=E6=A0=87=E5=9B=9E=E9=80=80?=
+ =?UTF-8?q?=E5=87=BD=E6=95=B0=E4=BF=9D=E7=95=99?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ pet/speech_bubble.py | 10 ++++++++++
+ pet/window.py        |  6 ++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/pet/speech_bubble.py b/pet/speech_bubble.py
+index f6d6af8..6e0631e 100644
+--- a/pet/speech_bubble.py
++++ b/pet/speech_bubble.py
+@@ -903,6 +903,8 @@ class PetSpeechBubble(QFrame):
+         # 动画/普通气泡偶尔会在之后尝试重绘同一窗口；若允许无按钮的
+         # show_text 覆盖这里，视觉上文字还在，但按钮已被 teardown。
+         if self._interactive_active and not interactive:
++            # 本地补丁诊断
++            logging.info("[bubble-show] 被 _interactive_active 拦截: text=%r", str(text)[:40])
+             return
+         self._content_kind = "text"
+         self._raw_text = text
+@@ -959,6 +961,8 @@ class PetSpeechBubble(QFrame):
+             self._setup_buttons(buttons)
+             self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+             self._interactive_active = True
++            # 本地补丁诊断
++            logging.info("[bubble-show] 进入交互模式 buttons=%s", [b[0] for b in (buttons or [])])
+         else:
+             self._teardown_interactive()
+         duration_ms = self._layout_text_content(anchor_rect, sticky=sticky, duration_ms=duration_ms)
+@@ -967,6 +971,12 @@ class PetSpeechBubble(QFrame):
+         self.show()
+         if not _MAC:
+             self.raise_()
++        # 本地补丁诊断
++        import logging as _logging
++        _logging.info("[bubble-show] visible=%s geo=%s capture_compat=%s parent=%s text=%r",
++                      self.isVisible(), self.geometry().getRect(), self._capture_compat,
++                      (self.parentWidget().__class__.__name__ if self.parentWidget() else None),
++                      str(text)[:30])
+         if sticky or interactive:
+             # 审批等需主动关闭的气泡：不启动自动隐藏，由上层 dismiss() 收尾
+             self._hide_timer.stop()
+diff --git a/pet/window.py b/pet/window.py
+index 7f66686..17974d2 100644
+--- a/pet/window.py
++++ b/pet/window.py
+@@ -3821,7 +3821,13 @@ class PetWindow(QWidget, WindowFeatureGateMixin):
+ 
+         提醒消息队列激活期间（有审批/问题/硬失败/卡住提醒在展示），普通气泡
+         直接让路丢弃，不覆盖提醒弹窗。"""
++        # 本地补丁诊断：气泡请求入口探针
++        logging.info("[bubble-probe] text=%r visible=%s suppressed=%s alert_stuck=%s",
++                     str(text)[:40], self.isVisible(), self._bubble_suppressed,
++                     getattr(self, "_alert_current", None) is not None)
+         if not self.isVisible() or self._bubble_suppressed:
++            logging.info("[bubble-probe] 丢弃原因: visible=%s suppressed=%s",
++                         self.isVisible(), self._bubble_suppressed)
+             return
+         if not sticky and not buttons and getattr(self, "_alert_current", None) is not None:
+             # 有提醒在展示：普通气泡让路，绝不覆盖审批弹窗
+-- 
+2.53.0
+
