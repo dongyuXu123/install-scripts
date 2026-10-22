@@ -16,6 +16,7 @@
 | [dsh-pet桌宠/](dsh-pet桌宠/) | dsh-pet 桌宠 + hermes/codex/zcode 三 Agent 联动（接线说明、hook/桥接脚本、7 个本地源码补丁） | 见 README-安装与联动说明.md |
 | [system-update-cleanup/](system-update-cleanup/) | 系统更新 + 垃圾清理一键脚本（apt 全量升级、snap 清旧版、日志收缩，幂等） | `sudo bash update-and-clean.sh` |
 | [系统镜像快照/](系统镜像快照/) | dd+zstd 整分区系统镜像一键快照（存共用 NTFS，自动生成还原脚本） | `sudo bash 创建系统镜像快照.sh` |
+| [dock图标/](dock图标/) | 左侧 Dock 分区图标 v5 拟人角色卡（udev 规则按 UUID 绑定 + 外接默认 GLM + EFI 隐藏；含成品图标、原图与生成脚本） | `sudo bash install-udev-rules.sh` |
 
 每个目录内的 `README.md` 记录背景、用法、回滚方式和当时的踩坑要点。
 

@@ -54,9 +54,12 @@ ESP_UUID="$(lsblk -no UUID "$SRC_ESP")"
 [ -n "$ROOT_UUID" ] && [ -n "$ESP_UUID" ] || die "读取分区 UUID 失败"
 
 log "1/7 挂载数据分区 $DATA_PART"
+WE_MOUNTED=0
 MNT=""
 if findmnt -rn -S "$DATA_PART" >/dev/null; then
-  MNT="$(findmnt -rn -S "$DATA_PART" -o TARGET | head -n1)"
+  # 注意：findmnt 的 TARGET 会把中文转义成 \x.. 字面量，不能拿去当路径用；
+  # 用 lsblk 非 raw 模式取真实挂载点
+  MNT="$(lsblk -no MOUNTPOINT "$DATA_PART" | head -n1)"
   echo "$DATA_PART 已挂载在 $MNT，直接使用"
 else
   MNT="/mnt/ntfs-snapshot"
@@ -67,10 +70,30 @@ else
         || die "无法挂载 $DATA_PART。若提示卷被占用/脏卷，请先到 Windows 端正常关机一次再试"
     fi
   fi
+  WE_MOUNTED=1
 fi
-trap 'umount "$MNT" 2>/dev/null || true' EXIT
 
-touch "$MNT/.rwtest" 2>/dev/null || die "$MNT 挂载为只读，无法写入镜像"
+# 可写自检；若真只读则依次尝试：重挂 rw → 卸载清 NTFS 脏位后自挂
+if ! touch "$MNT/.rwtest" 2>/dev/null; then
+  echo "当前挂载不可写，尝试重挂为可写……"
+  mount -o remount,rw "$MNT" 2>/dev/null || true
+fi
+if ! touch "$MNT/.rwtest" 2>/dev/null; then
+  echo "仍不可写：卸载并清除 NTFS 脏位（ntfsfix -d）后由脚本自行挂载"
+  umount "$MNT" 2>/dev/null \
+    || die "无法卸载 $MNT（可能文件管理器/终端正占用该分区），请关闭相关窗口后重跑"
+  MNT="/mnt/ntfs-snapshot"; mkdir -p "$MNT"
+  ntfsfix -d "$DATA_PART" >/dev/null 2>&1 || true
+  if ! mount -t ntfs3 -o rw "$DATA_PART" "$MNT" 2>/dev/null; then
+    mount -t ntfs3 -o rw,force "$DATA_PART" "$MNT" 2>/dev/null \
+      || mount -t ntfs-3g -o rw "$DATA_PART" "$MNT" \
+      || die "清除脏位后仍无法可写挂载，请到 Windows 端正常关机一次再试"
+  fi
+  WE_MOUNTED=1
+fi
+trap '[ "$WE_MOUNTED" = 1 ] && umount "$MNT" 2>/dev/null || true' EXIT
+
+touch "$MNT/.rwtest" 2>/dev/null || die "$MNT 仍不可写，无法写入镜像"
 rm -f "$MNT/.rwtest"
 
 FREE_GB="$(df -BG --output=avail "$MNT" | tail -n1 | tr -dc '0-9')"
