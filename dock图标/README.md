@@ -18,7 +18,7 @@ Ubuntu 左侧 Dash to Dock 开着「显示挂载卷」，两块 NVMe 的 6 个�
 | nvme0n1p5 游戏及数据 (E盘) | `card-gemini` | Gemini 幻星灵狐 |
 | nvme1n1p3 linux与windows共用 | `card-deepseek` | DeepSeek 深海女仆 |
 | nvme1n1p1 / nvme0n1p1 两个 EFI | — | `UDISKS_IGNORE=1` 隐藏（不影响 /boot/efi 挂载） |
-| 外接 USB 分区（默认） | `card-glm` | GLM 玄夜知更 |
+| 外接 USB 分区 | 插入时**自动随机分配一个不重复的角色**（systemd 服务 `dock-icon-assign@`，带文件锁+自动去重，按 UUID 持久记忆；GLM 仅为兜底） |
 
 备用形象（给外接设备逐个分配）：
 `card-kimi`(Kimi 月栖安者) `card-qwen`(Qwen 青岚雅士) `card-grok`(Grok 黑曜公主)

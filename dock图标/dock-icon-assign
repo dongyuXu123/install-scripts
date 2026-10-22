@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# dock-icon-assign <内核设备名如 sda3>：随机分配不重复角色（幂等、带锁、自去重）
+set -euo pipefail
+[ $# -ge 1 ] || exit 0
+DEVNODE=/dev/$1
+MAIN=/etc/udev/rules.d/99-dock-drive-icons.rules
+AUTO=/etc/udev/rules.d/99-z-dock-icons-auto.rules
+touch "$AUTO"
+dedupe() { # 同一 UUID 只保留最后一行（udev 语义即最后匹配生效）
+  local f=$1; [ -s "$f" ] || return 0
+  awk -F'"' '{last[$2]=$0} END{for(u in last) print last[u]}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
+exec 9>"$AUTO.lock"
+flock 9
+dedupe "$AUTO"
+uuid=$(udevadm info -q property "$DEVNODE" 2>/dev/null | awk -F= '/^ID_FS_UUID=/{print $2}')
+[ -n "${uuid:-}" ] || exit 0
+grep -q "ID_FS_UUID==\"$uuid\"" "$MAIN" "$AUTO" 2>/dev/null && exit 0
+ALL="card-claude card-gpt card-gemini card-deepseek card-glm card-kimi card-qwen card-grok card-ernie card-hunyuan card-seed card-minimax card-mistral card-llama"
+used=$(grep -h 'ID_FS_UUID' "$MAIN" "$AUTO" 2>/dev/null | grep -oh 'card-[a-z]*' | sort -u || true)
+pool=()
+for c in $ALL; do grep -qx "$c" <<<"$used" || pool+=("$c"); done
+[ ${#pool[@]} -gt 0 ] || pool=($ALL)
+pick=$(shuf -n1 -e -- "${pool[@]}")
+echo "ENV{ID_FS_UUID}==\"$uuid\", ENV{UDISKS_ICON_NAME}=\"$pick\", ENV{UDISKS_SYMBOLIC_ICON_NAME}=\"$pick\"" >> "$AUTO"
+udevadm control --reload
+udevadm trigger --name-match="$DEVNODE"
+logger -t dock-icon-assign "$DEVNODE (UUID=$uuid) -> $pick"
